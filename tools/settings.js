@@ -29,9 +29,9 @@ process.stdout.on('error', err => {
 function getVersion(buildType) {
   const gitInfo = gitDescribeSync();
 
-  if (buildType === 'production' && gitInfo.dirty) {
-    throw new Error('cannot create production build with dirty git state!');
-  }
+//  if (buildType === 'production' && gitInfo.dirty) {
+//    throw new Error('cannot create production build with dirty git state!');
+//  }
 
   const version = `${gitInfo.semver}.${gitInfo.distance}`;
   let versionName = 'Official Build';
