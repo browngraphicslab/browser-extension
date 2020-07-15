@@ -71,6 +71,31 @@ export default function HypothesisChromeExtension(dependencies) {
     chromeTabs.onReplaced.addListener(onTabReplaced);
 
     chromeTabs.onRemoved.addListener(onTabRemoved);
+
+    chrome.tabs.executeScript({ code: `document.addEventListener("linkToDash", e => {
+        console.log("extension received linkToDash");
+        chrome.runtime.sendMessage({ text: e.detail });
+      })` }); // the text sent is the ID of the annotation to be linked
+    
+    chrome.runtime.onMessage.addListener(function (msg) {
+      if (msg.text !== undefined) {
+        openDashTab(msg.text)
+      }
+    });
+    
+    function openDashTab(annotationId) {
+      console.log("openDashTab");
+      var isDashDoc = (url) => url.includes("localhost:1050/doc/") || url.includes("browndash.com/doc/");
+
+      chrome.tabs.query({currentWindow: true, active: true}, function(tabs){
+        var currentTab = tabs[0];
+        chrome.tabs.query({currentWindow: true}, tabs => {
+          tabs.filter(t => isDashDoc(t.url)).forEach(t => { 
+              chrome.tabs.executeScript(currentTab.tabId, {code: 'window.stop()'});
+              chrome.tabs.update(t.id, {active:true, selected:true});
+          })});
+      });
+    }
   };
 
   /* A method that can be used to setup the extension on existing tabs
