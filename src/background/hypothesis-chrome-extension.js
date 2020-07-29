@@ -51,6 +51,61 @@ export default function HypothesisChromeExtension(dependencies) {
     isAllowedFileSchemeAccess: dependencies.isAllowedFileSchemeAccess,
   });
 
+  var annotationId = "";
+  var annotationUri = "";
+
+  // when switched to Dash tab, send event containing the id and uri of the annotation to be linked to Dash page
+  var tabListener = function() {
+    if (annotationId) {
+      chrome.tabs.executeScript({ code: `document.dispatchEvent(new CustomEvent("linkAnnotationToDash", { 
+        detail: { id: "${annotationId}", uri: "${annotationUri}" }
+      }))` });
+      annotationId = "";
+      chrome.tabs.onSelectionChanged.removeListener(tabListener);
+    }
+  }
+
+  const linkListenerScript = `document.addEventListener("linkToDash", e => {
+    chrome.runtime.sendMessage({ id: e.detail.split(' ')[0], uri: e.detail.split(' ')[1] }); 
+  })`;
+
+  function linkMessageListener (msg) {
+    if (msg.id !== undefined && msg.uri !== undefined) {
+      annotationId = msg.id;
+      annotationUri = msg.uri
+      openDashTab();
+    }
+  }
+
+  // open Dash tab if one exists in the current window) 
+  function openDashTab() {
+    chrome.tabs.executeScript({ code: `console.log("openDashTab");` });
+    var isDash = (url) => url.includes("localhost:1050/doc/") || url.includes("browndash.com/doc/");
+
+    chrome.tabs.query({currentWindow: true, active: true}, function(tabs){
+      // notify Dash to start a link from an annotation
+      chrome.tabs.executeScript({ code: `document.dispatchEvent(new CustomEvent("linkAnnotationToDash", { 
+        detail: {
+          id: "${annotationId}",
+          uri: "${annotationUri}"
+        }
+      }))` }); 
+
+      var currentTab = tabs[0];
+      !isDash(currentTab.url) && chrome.tabs.query({currentWindow: true}, function(tabs){
+        var dashTabs = tabs.filter(t => isDash(t.url));
+        if (dashTabs.length) { // find and switch over to the first open Dash tab
+            chrome.tabs.executeScript(currentTab.tabId, {code: 'window.stop()'});
+            chrome.tabs.onSelectionChanged.addListener(tabListener);
+            chrome.tabs.update(dashTabs[0].id, {active:true, selected:true});
+        } else { 
+          chrome.tabs.create({ url: "localhost:1050/home" }); // open new Dash tab if none are currently open
+          // SWITCH out for https://browndash.com/home
+        }
+      })
+    });
+  }
+
   restoreSavedTabState();
 
   /* Sets up the extension and binds event listeners. Requires a window
@@ -72,71 +127,11 @@ export default function HypothesisChromeExtension(dependencies) {
 
     chromeTabs.onRemoved.addListener(onTabRemoved);
 
-    var annotationId = "";
-    var annotationUri = "";
-
-    // var isInstalled = state.getState(tab.id).extensionSidebarInstalled;
-    // if(typeof chrome.app.isInstalled !== 'undefined') {
-    //   chrome.runtime.sendMessage({ id: e.detail.split(' ')[0], uri: e.detail.split(' ')[1] }); 
-    // } else {
-    //   console.log("DASH error: uninstalled");
-    // }
-
     // listen for linkToDash event sent from the client's annotator and send message to notify the extension,
     // then send the message to itself
-    chrome.tabs.executeScript({ code: `document.addEventListener("linkToDash", e => {
-      chrome.runtime.sendMessage({ id: e.detail.split(' ')[0], uri: e.detail.split(' ')[1] }); 
-    })`}); 
-
-    // listen for message from itself
-    chrome.runtime.onMessage.addListener(function (msg) {
-      if (msg.id !== undefined && msg.uri !== undefined) {
-        annotationId = msg.id;
-        annotationUri = msg.uri
-        openDashTab();
-      }
-    });
-    
-    // when switched to Dash tab, send event containing the id and uri of the annotation to be linked to Dash page
-    var tabListener = function(details) {
-      if (annotationId) {
-        chrome.tabs.executeScript({ code: `document.dispatchEvent(new CustomEvent("linkAnnotationToDash", { 
-          detail: { id: "${annotationId}", uri: "${annotationUri}" }
-        }))` });
-        annotationId = "";
-        chrome.tabs.onSelectionChanged.removeListener(tabListener);
-      }
-    }
-
-    // open Dash tab if one exists in the current window) 
-    // TODO: open new Dash tab if there are none in the current window
-    function openDashTab() {
-      chrome.tabs.executeScript({ code: `console.log("openDashTab");` });
-      var isDash = (url) => url.includes("localhost:1050/doc/") || url.includes("browndash.com/doc/");
-
-      chrome.tabs.query({currentWindow: true, active: true}, function(tabs){
-        // notify Dash to start a link from an annotation
-        chrome.tabs.executeScript({ code: `document.dispatchEvent(new CustomEvent("linkAnnotationToDash", { 
-          detail: {
-            id: "${annotationId}",
-            uri: "${annotationUri}"
-          }
-        }))` }); 
-
-        var currentTab = tabs[0];
-        !isDash(currentTab.url) && chrome.tabs.query({currentWindow: true}, function(tabs){
-          var dashTabs = tabs.filter(t => isDash(t.url));
-          if (dashTabs.length) { // find and switch over to the first open Dash tab
-              chrome.tabs.executeScript(currentTab.tabId, {code: 'window.stop()'});
-              chrome.tabs.onSelectionChanged.addListener(tabListener);
-              chrome.tabs.update(dashTabs[0].id, {active:true, selected:true});
-          } else { 
-            chrome.tabs.create({ url: "localhost:1050/home" }); // open new Dash tab if none are currently open
-            // SWITCH out for https://browndash.com/home
-          }
-        })
-      });
-    }
+    chrome.tabs.executeScript({ code: linkListenerScript}); 
+    // listen for message from itself, then open Dash Tab
+    chrome.runtime.onMessage.addListener(linkMessageListener);
   };
 
   /* A method that can be used to setup the extension on existing tabs
@@ -254,6 +249,9 @@ export default function HypothesisChromeExtension(dependencies) {
         state: newActiveState,
       });
     }
+
+    chrome.tabs.executeScript({ code: linkListenerScript}); 
+    chrome.runtime.onMessage.addListener(linkMessageListener);
   }
 
   function onTabReplaced(addedTabId, removedTabId) {
@@ -266,6 +264,9 @@ export default function HypothesisChromeExtension(dependencies) {
     chromeTabs.get(addedTabId, function (tab) {
       updateAnnotationCountIfEnabled(addedTabId, tab.url);
     });
+
+    chrome.tabs.executeScript({ code: linkListenerScript}); 
+    chrome.runtime.onMessage.addListener(linkMessageListener);
   }
 
   function onTabCreated(tab) {
