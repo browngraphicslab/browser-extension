@@ -53,6 +53,40 @@ export default function HypothesisChromeExtension(dependencies) {
 
   var annotationId = "";
   var annotationUri = "";
+  var index = Date.now();
+
+  var linkListenerScript = `document.addEventListener("linkToDash", e => {
+      console.log("linkToDash heard idk where");
+      chrome.runtime.sendMessage({ id: e.detail.split(' ')[0], uri: e.detail.split(' ')[1] }); 
+    });
+    document.body.dashListener = "true";
+    console.log("REGISTERING dashListener"); `;
+
+  // If no linkToDash listener has been registered yet, register a listener
+  function registerListener(dashListener) {
+    chrome.tabs.executeScript({ code: `console.log("registerListener called, dashListener? ${dashListener}")` });
+
+    // Match the unique dashId to prevent duplicate listeners
+    chrome.tabs.executeScript({ code: 'document.body.dashId' }, function (dashId) {
+      if ((dashId.length > 0 && dashId[0] == index)) {
+        
+        chrome.tabs.executeScript({ code: `console.log("dashListener? ${dashListener}, dashId: ${dashId[0]}")` });
+        if (dashListener.length > 0 && !dashListener[0]) {
+          chrome.tabs.executeScript({ code: linkListenerScript });
+          index++;
+        }
+      }
+    })
+  }
+
+  function linkMessageListener (msg) {
+    chrome.tabs.executeScript({ code: `console.log("linkMessageListener");` });
+    if (msg.id !== undefined && msg.uri !== undefined) {
+      annotationId = msg.id;
+      annotationUri = msg.uri
+      openDashTab();
+    }
+  }
 
   // when switched to Dash tab, send event containing the id and uri of the annotation to be linked to Dash page
   var tabListener = function() {
@@ -62,18 +96,6 @@ export default function HypothesisChromeExtension(dependencies) {
       }))` });
       annotationId = "";
       chrome.tabs.onSelectionChanged.removeListener(tabListener);
-    }
-  }
-
-  const linkListenerScript = `document.addEventListener("linkToDash", e => {
-    chrome.runtime.sendMessage({ id: e.detail.split(' ')[0], uri: e.detail.split(' ')[1] }); 
-  })`;
-
-  function linkMessageListener (msg) {
-    if (msg.id !== undefined && msg.uri !== undefined) {
-      annotationId = msg.id;
-      annotationUri = msg.uri
-      openDashTab();
     }
   }
 
@@ -112,6 +134,7 @@ export default function HypothesisChromeExtension(dependencies) {
    * object to be passed so that it can listen for localStorage events.
    */
   this.listen = function () {
+    chrome.tabs.executeScript({ code: "console.log('this.listen called')" });
     chromeBrowserAction.onClicked.addListener(onBrowserActionClicked);
     chromeTabs.onCreated.addListener(onTabCreated);
 
@@ -126,12 +149,6 @@ export default function HypothesisChromeExtension(dependencies) {
     chromeTabs.onReplaced.addListener(onTabReplaced);
 
     chromeTabs.onRemoved.addListener(onTabRemoved);
-
-    // listen for linkToDash event sent from the client's annotator and send message to notify the extension,
-    // then send the message to itself
-    chrome.tabs.executeScript({ code: linkListenerScript}); 
-    // listen for message from itself, then open Dash Tab
-    chrome.runtime.onMessage.addListener(linkMessageListener);
   };
 
   /* A method that can be used to setup the extension on existing tabs
@@ -250,8 +267,15 @@ export default function HypothesisChromeExtension(dependencies) {
       });
     }
 
-    chrome.tabs.executeScript({ code: linkListenerScript}); 
+    // listen for a linkToDash message from itself
+    chrome.runtime.onMessage.removeListener(linkMessageListener);
     chrome.runtime.onMessage.addListener(linkMessageListener);
+
+    // listen for linkToDash event sent from the client's annotator and send message to notify the extension, then send the message to itself
+    chrome.tabs.executeScript({ code: `console.log("onTabUpdated")` });
+    chrome.tabs.executeScript({ code: `    
+      ((document.body.dashId = "${index}") || true) ? document.body.dashListener === 'true' : undefined;`
+    }, registerListener)
   }
 
   function onTabReplaced(addedTabId, removedTabId) {
@@ -265,11 +289,18 @@ export default function HypothesisChromeExtension(dependencies) {
       updateAnnotationCountIfEnabled(addedTabId, tab.url);
     });
 
-    chrome.tabs.executeScript({ code: linkListenerScript}); 
+    chrome.runtime.onMessage.removeListener(linkMessageListener);
     chrome.runtime.onMessage.addListener(linkMessageListener);
+
+    chrome.tabs.executeScript({ code: `console.log("onTabReplaced")` });
+    chrome.tabs.executeScript({ code: `    
+      ((document.body.dashId = "${index}") || true) ? document.body.dashListener === 'true' : undefined;`
+    }, registerListener)
   }
 
   function onTabCreated(tab) {
+    chrome.tabs.executeScript({ code: `console.log("onTabCreated")` });
+
     // Clear the state in case there is old, conflicting data in storage.
     state.clearTab(tab.id);
   }
