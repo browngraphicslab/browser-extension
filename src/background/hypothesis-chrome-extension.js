@@ -106,10 +106,7 @@ export default function HypothesisChromeExtension(dependencies) {
     chrome.tabs.query({currentWindow: true, active: true}, function(tabs){
       // notify Dash to start a link from an annotation
       chrome.tabs.executeScript({ code: `document.dispatchEvent(new CustomEvent("linkAnnotationToDash", { 
-        detail: {
-          id: "${annotationId}",
-          uri: "${annotationUri}",
-        }
+        detail: { id: "${annotationId}", uri: "${annotationUri}" }
       }))` }); 
 
       var currentTab = tabs[0];
