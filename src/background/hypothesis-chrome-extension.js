@@ -117,8 +117,7 @@ export default function HypothesisChromeExtension(dependencies) {
             chrome.tabs.onSelectionChanged.addListener(tabListener);
             chrome.tabs.update(dashTabs[0].id, {active:true, selected:true});
         } else { 
-          chrome.tabs.create({ url: "localhost:1050/home" }); // open new Dash tab if none are currently open
-          // SWITCH out for https://browndash.com/home
+          chrome.tabs.create({ url: "https://browndash.com/home" }); // open new Dash tab if none are currently open
         }
       })
     });
